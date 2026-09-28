@@ -1021,6 +1021,14 @@ textarea.search{resize:vertical}
 
   <!-- Right-click menu, shared by tasks, calendar events and steps. -->
   <div class="ctxmenu" id="ctxMenu" hidden></div>
+  <!-- Edit… from the right-click menu: a form built from the API schema. -->
+  <div class="modal" id="ctxEdit" hidden onclick="App.ctxEditClose(event)">
+    <div class="modalbox" style="width:min(640px,94vw)" onclick="event.stopPropagation()"
+         oncontextmenu="event.stopPropagation()"
+         onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey))App.ctxEditSave()">
+      <div id="ctxEditBody"></div>
+    </div>
+  </div>
 
   <!-- Command Deck's own tabs, pinned directly under the nav trigger so they
        cost the page no vertical space and the terminal can sit higher. -->
@@ -1964,6 +1972,7 @@ const App = {
       if (this.consoleMax && document.activeElement !== $('chatInput')) return this.toggleConsoleMax();
       // Innermost thing first: the menu, then the task bubble, then the player.
       if (!$('ctxMenu')?.hidden) return this.closeCtx();
+      if (!$('ctxEdit')?.hidden) return this.ctxEditClose();
       if (!$('taskModal')?.hidden) return this.closeTask();
       this.closePlayerModal();
     });
@@ -1979,8 +1988,20 @@ const App = {
     document.addEventListener('contextmenu', e => {
       // A right-click on empty deck dismisses the menu and gives the browser
       // its own back; handlers that opened ours already stopped propagation.
-      if (!$('ctxMenu')?.contains(e.target)) this.closeCtx();
+      if ($('ctxMenu')?.contains(e.target)) return;
+      if (!this.ctxOpenFor(e)) this.closeCtx();
     });
+    // Double-click a tagged item to edit it (not on its buttons or fields).
+    document.addEventListener('dblclick', e => {
+      if (e.target.closest('button, a, input, textarea, select, [contenteditable]')) return;
+      const el = e.target.closest('[data-ctx]');
+      // A row whose single click already opens something keeps that.
+      if (!el || el.hasAttribute('onclick')) return;
+      const [type, ...rest] = el.dataset.ctx.split(':');
+      if (this.ctxTypes()[type]?.schema) this.ctxEdit(type, rest.join(':'));
+    });
+    window.addEventListener('pagehide', () => this.flushDeletes());
+    this._schemas().catch(() => {});
     this.connectStream();
     this.initGalaxy();
     this.initPlayer();
@@ -2418,7 +2439,7 @@ const App = {
 
     body.innerHTML = open.length ? open.map(a => {
       const col = C.sev[a.severity] || C.sev.info;
-      return `<div class="alertcard" data-alert="${a.id}" style="border:1px solid ${alpha(col,'33')};margin-bottom:8px">
+      return `<div class="alertcard" data-alert="${a.id}" data-ctx="alert:${a.id}" style="border:1px solid ${alpha(col,'33')};margin-bottom:8px">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
           <span class="mono" style="font-size:10px;letter-spacing:1px;color:${col};text-transform:uppercase">${esc(a.severity)}</span>
           <span class="mono" style="font-size:10px;color:#726c6f">${esc(a.source)}</span>
@@ -2910,7 +2931,7 @@ const App = {
         <button class="${this.agentFilter===k?'on':''}" onclick="App.setFilter('${k}')">${k.toUpperCase()}</button>`).join('')}</div>
 
       <div class="grid3">${shown.map(a => `
-        <div class="agentcard">
+        <div data-ctx="agent:${esc(a.id)}" class="agentcard">
           <div style="display:flex;align-items:center;gap:12px">
             <div class="ring" style="width:52px;height:52px;font-size:20px;border:2px solid ${C.status[a.status]||C.status.offline};
               ${a.status==='online'?'box-shadow:0 0 12px rgba(52,211,153,.35)':''}">${a.emoji}</div>
@@ -2949,12 +2970,12 @@ const App = {
       const items = b.tasks.filter(t => t.status === c.key);
       return `<div class="boardcol" ondragover="App.over(event,this)" ondragleave="this.classList.remove('over')"
                    ondrop="App.drop(event,'${c.key}',this)">
-        <div class="boardhead"><span class="t">${c.label}</span><span class="tiny">${items.length}</span></div>
+        <div class="boardhead" data-ctx-add="task:${c.key}"><span class="t">${c.label}</span><span class="tiny">${items.length}</span></div>
         <div class="rowlist">${items.map(t => `
           <div class="taskcard" draggable="true" ondragstart="App.dragId='${t.id}'"
                style="cursor:pointer" title="Click to open · right-click for options"
                onclick="App.openTask('${esc(t.id)}')"
-               oncontextmenu="App.taskMenu(event,'${esc(t.id)}')">
+               data-ctx="task:${esc(t.id)}">
             <div style="display:flex;justify-content:space-between;gap:8px">
               <span class="p" style="color:${C.prio[t.priority]}">${esc(t.priority)}</span>
               ${t.due_date ? `<span class="p" style="color:${t.due_date < localISO() && t.status!=='done' ? '#ff2d3d' : '#726c6f'}">${esc(dueLabel(t.due_date))}</span>` : ''}
@@ -2967,7 +2988,7 @@ const App = {
     }).join('');
 
     const events = (this.data.timeline || this.timelineCache || []).map(e => `
-      <div class="listrow" oncontextmenu="App.eventMenu(event,'${esc(e.id)}')"
+      <div class="listrow" data-ctx="event:${esc(e.id)}"
            title="Right-click for options">
         <div><div style="font-size:13px">${esc(e.title)}</div>
           <div class="tiny" style="margin-top:2px">${esc(e.date)}${e.time ? ' · ' + esc(e.time) : ''}</div></div>
@@ -2986,7 +3007,7 @@ const App = {
       </div>
 
       <div class="card">
-        <div class="cardhead"><h2>Capture</h2>
+        <div class="cardhead" data-ctx-add="task"><h2>Capture</h2>
           <span class="tiny">writes straight into the vault — ${esc(b.source_file.split('/').pop())}</span></div>
         <div class="filters" style="margin-bottom:14px">
           ${[['task','+ Task'],['event','+ Calendar event'],['note','+ Quick note']].map(([k,l]) => `
@@ -3029,7 +3050,7 @@ const App = {
 
       <div class="cols2" style="grid-template-columns:2.4fr 1fr">
         <div class="board">${board}</div>
-        <div class="card"><h2>Upcoming</h2>${events}
+        <div class="card"><h2 data-ctx-add="event">Upcoming</h2>${events}
           <div class="tiny" style="margin-top:14px;color:#726c6f">Drag a card between columns to change its status — it writes straight back to the vault.</div>
         </div>
       </div>
@@ -3232,7 +3253,7 @@ const App = {
         ...events.filter(e => e.date === iso).map(e => `
           <div class="calchip ev" draggable="true" title="${esc(e.title)} · right-click for options"
                ondragstart="App.calDragStart(event,'event','${esc(e.id)}')"
-               oncontextmenu="App.eventMenu(event,'${esc(e.id)}')">
+               data-ctx="event:${esc(e.id)}">
             ${e.time ? `<span class="cw">${esc(e.time)}</span>` : ''}${esc(e.title)}
           </div>`),
         ...dated.filter(t => t.due_date === iso).map(t => {
@@ -3243,7 +3264,7 @@ const App = {
                draggable="true" style="cursor:pointer"
                title="${esc(t.title)} · ${esc(t.status)} · click to open"
                onclick="App.openTask('${esc(t.id)}')"
-               oncontextmenu="App.taskMenu(event,'${esc(t.id)}')"
+               data-ctx="task:${esc(t.id)}"
                ondragstart="App.calDragStart(event,'task','${esc(t.id)}')">
             <span class="cw" style="color:${C.prio[t.priority]}">${esc(t.priority)}</span>${esc(t.title)}${
             steps ? `<span class="cw" style="margin-left:6px">${done}/${steps}</span>` : ''}
@@ -3251,7 +3272,7 @@ const App = {
         }),
       ].join('');
 
-      cells.push(`<div class="${cls.join(' ')}"
+      cells.push(`<div class="${cls.join(' ')}" data-ctx-add="event:${iso},task:${iso}"
            ondragover="App.calOver(event,this)" ondragleave="this.classList.remove('over')"
            ondrop="App.calDrop(event,'${iso}',this)">
         <div class="dnum"><span>${d.getDate()}</span></div>${chips}
@@ -3263,7 +3284,7 @@ const App = {
       <div class="calchip" draggable="true" style="cursor:pointer"
            title="${esc(t.title)} · click to open · right-click for options"
            onclick="App.openTask('${esc(t.id)}')"
-           oncontextmenu="App.taskMenu(event,'${esc(t.id)}')"
+           data-ctx="task:${esc(t.id)}"
            ondragstart="App.calDragStart(event,'task','${esc(t.id)}')">
         <span class="cw" style="color:${C.prio[t.priority]}">${esc(t.priority)}</span>${esc(t.title)}
       </div>`).join('') || '<div class="tiny" style="color:#726c6f">Everything has a date on it.</div>';
@@ -3490,7 +3511,7 @@ const App = {
         <div class="rowlist" style="gap:7px;margin-top:10px">
           ${steps.map(s => `
             <div class="tmrow${s.done ? ' on' : ''}"
-                 oncontextmenu="App.subtaskMenu(event,'${esc(t.id)}','${esc(s.id)}')">
+                 data-ctx="subtask:${esc(t.id)}:${esc(s.id)}">
               <button class="tmbox${s.done ? ' on' : ''}" title="${s.done ? 'Reopen' : 'Done'}"
                       onclick="App.toggleSubtask('${esc(t.id)}','${esc(s.id)}',${!s.done})">✓</button>
               <input class="tx" id="tmStep-${esc(s.id)}" value="${esc(s.title)}"
@@ -3715,52 +3736,364 @@ const App = {
     if (item && item.fn) item.fn();
   },
 
-  taskMenu(ev, id){
-    const t = ((this.data.board || {}).tasks || []).find(x => x.id === id);
-    if (!t) return;
-    const moves = [['todo','To Do'],['in_progress','In Progress'],['blocked','Blocked'],['done','Done']]
-      .filter(([k]) => k !== t.status)
-      .map(([k, l]) => ({label: 'Move to ' + l, emoji: k === 'done' ? '✅' : '→',
-                         fn: () => this.patchTask(id, {status: k})}));
-    this.openCtx(ev, t.title, [
-      {label:'Open details', emoji:'🫧', fn: () => this.openTask(id)},
-      {label:'Rename…', emoji:'✏️', fn: () => this.renameTask(id, t.title)},
-      {label:'Add sub-task…', emoji:'➕', fn: () => this.quickAddSubtask(id)},
-      {label: t.notes ? 'Edit notes…' : 'Add notes…', emoji:'📝', fn: () => this.editTaskNotes(id, t.notes)},
-      {sep:true},
-      ...moves,
-      {sep:true},
-      {label:'Set due date…', emoji:'📅', fn: () => this.setTaskDue(id, t.due_date)},
-      t.due_date ? {label:'Clear due date', emoji:'⌫', fn: () => this.patchTask(id, {due_date: null})} : null,
-      {sep:true},
-      {label:'Delete task', emoji:'🗑', danger:true, fn: () => this.deleteTask(id)},
-    ]);
+  /* ---- right-click anything ----
+     Any element tagged data-ctx="<type>:<id>" gets a menu from CTX_TYPES:
+     Edit… (a form built from the API's own …Update schema in /openapi.json),
+     one-click values for its status-like fields, extras, and Delete with a
+     six-second undo. Adding a new kind of item is one registry entry plus the
+     tag on its row, with no form code. The server stays the authority: every
+     value is validated by the same PATCH/DELETE routes the deck already uses. */
+  ctxTypes(){
+    const d = this.data || {};
+    const by = (list, id) => (list || []).find(x => String(x.id) === String(id));
+    const link = o => { const m = String(o.link || o.notes || '').match(/https:\/\/\S+/); return m ? m[0] : ''; };
+    const f = d.finance || {}, c = d.credit || {};
+    return {
+      deal: {find: id => by(d.deals, id) || by(d.biz?.recent_deals, id), title: o => o.client,
+             schema:'DealUpdate', url: id => `/api/biz/deals/${id}`, del:true, quick:['stage'], link},
+      annotation: {find: id => by(d.annotations, id), title: o => o.company,
+             schema:'AnnotationUpdate', url: id => `/api/biz/annotations/${id}`, del:true, quick:['status']},
+      division: {find: id => by(d.biz?.divisions, id), title: o => o.name,
+             schema:'DivisionUpdate', url: id => `/api/biz/divisions/${id}`, quick:['stage','health']},
+      venture: {find: id => by(d.money?.by_venture, id) || (d.biz?.divisions || []).flatMap(x => x.ventures || []).find(v => v.id === id),
+             title: o => o.name, schema:'VentureUpdate', url: id => `/api/ventures/${id}`, quick:['stage','health']},
+      vevent: {find: id => by(d.money?.recent_events, id), title: o => o.label,
+             delUrl: o => `/api/ventures/${o.venture_id}/events/${o.id}`, del:true},
+      aiservice: {find: id => by(d.ai?.services, id), title: o => o.name,
+             schema:'AiServiceUpdate', url: id => `/api/money/ai-stack/${id}`, del:true},
+      // Debts write through to the vault ledger: settled, never deleted.
+      debt: {find: id => by(f.debts, id), title: o => o.creditor,
+             schema:'DebtUpdate', url: id => `/api/finance/debts/${id}`,
+             extra: o => o.status === 'paid' ? [] : [
+               {label:'Log a payment…', emoji:'💵', fn: () => this.payDebt(o.id)},
+               {label:'Mark paid off', emoji:'✅', fn: () => this.settleDebt(o.id)}]},
+      investment: {find: id => by(f.investment_accounts, id), title: o => o.name,
+             schema:'InvestmentAccountUpdate', url: id => `/api/finance/investments/${id}`, del:true},
+      goal: {find: id => by(f.investment_goals, id), title: o => o.name,
+             schema:'InvestmentGoalUpdate', url: id => `/api/finance/goals/${id}`, del:true},
+      fnote: {find: id => by(d.notes, id), title: o => o.title,
+             schema:'FinanceNoteUpdate', url: id => `/api/finance/notes/${id}`, del:true,
+             extra: o => [{label: o.pinned ? 'Unpin' : 'Pin', emoji:'📌', fn: () => this.ctxPatch('fnote', o.id, {pinned: !o.pinned})},
+                          {label:'Archive', emoji:'🗄', fn: () => this.ctxPatch('fnote', o.id, {archived: true})}]},
+      // Credit history is evidence for disputes: close, don't delete.
+      caccount: {find: id => by(c.accounts, id), title: o => o.account_name,
+             schema:'CreditAccountUpdate', url: id => `/api/credit/accounts/${id}`,
+             extra: o => o.is_active ? [{label:'Close account', emoji:'🔒',
+               fn: () => this.ctxPatch('caccount', o.id, {is_active: false, closed_on: localISO()})}] : []},
+      dispute: {find: id => by(c.open_disputes, id), title: o => [o.bureau, o.item].filter(Boolean).join(' · ') || ('Dispute #' + o.id),
+             schema:'CreditDisputeUpdate', url: id => `/api/credit/disputes/${id}`, quick:['outcome']},
+      cstep: {find: id => by(c.next_steps, id), title: o => o.title,
+             extra: o => [{label:'Mark done', emoji:'✓', fn: () => this.ctxPost(`/api/credit/plan/${o.id}/done`)}]},
+      job: {find: id => by(d.jobs?.applications, id), title: o => o.company + (o.role ? ' · ' + o.role : ''),
+             schema:'JobApplicationUpdate', url: id => `/api/jobs/${id}`, del:true, quick:['status'], link},
+      cert: {find: id => (d.certs?.certs || []).find(x => x.slug === id), title: o => o.name,
+             schema:'CertProgressUpdate', url: id => `/api/certs/${id}`, quick:['status']},
+      email: {find: id => by(d.inbox?.messages, id), title: o => o.subject || o.sender,
+             extra: o => [{label:'Mark read', emoji:'✉️', fn: () => this.ctxPost(`/api/email/${o.id}/read`)}]},
+      emailrule: {find: id => by(d.rules, id), title: o => o.match_value || ('Rule #' + o.id),
+             url: id => `/api/email/rules/${id}`, del:true},
+      session: {find: id => by(d.chatSessions, id), title: o => o.label,
+             schema:'ChatSessionUpdate', url: id => `/api/chat/sessions/${id}`, del:true,
+             extra: o => [{label:'Open this thread', emoji:'💬', fn: () => this.switchSession(o.id)},
+                          {label:'New thread', emoji:'➕', fn: () => this.newSession()},
+                          {label: this.consoleMax ? 'Shrink console' : 'Expand console', emoji:'⛶', fn: () => this.toggleConsoleMax()}]},
+      engine: {find: id => this.engineList().find(e => e.id === id), title: o => o.name,
+             extra: o => o.available === false ? [] : [
+               {label:'Talk to ' + o.name, emoji:'💬', fn: () => this.switchEngine(o.id)},
+               {label: this.consoleMax ? 'Shrink console' : 'Expand console', emoji:'⛶', fn: () => this.toggleConsoleMax()}]},
+      flog: {find: id => by(d.freight?.log, id), title: o => o.title || o.kind,
+             url: id => `/api/biz/freight/log/${id}`, del:true},
+      fday: {find: id => (d.freight?.daily || []).find(x => x.day === id), title: o => 'Numbers for ' + o.day,
+             url: id => `/api/biz/freight/daily/${id}`, del:true},
+      agent: {find: id => by(d.agents?.agents, id), title: o => o.name},
+      // Tasks, steps and events used to have their own hand-built menus; the
+      // extras keep what those menus did that the Edit form doesn't.
+      task: {find: id => by(d.board?.tasks, id), title: o => o.title,
+             schema:'TaskUpdate', url: id => `/api/tasks/${encodeURIComponent(id)}`, del:true, quick:['status','priority'],
+             extra: o => [{label:'Open details', emoji:'🫧', fn: () => this.openTask(o.id)},
+                          {label:'Add sub-task…', emoji:'➕', fn: () => this.quickAddSubtask(o.id)},
+                          ...(o.due_date ? [{label:'Clear due date', emoji:'⌫', fn: () => this.patchTask(o.id, {due_date: null})}] : [])]},
+      // "<taskId>:<stepId>". Deleting a step is immediate: it lives in the
+      // task window, which a delayed delete couldn't keep hidden.
+      subtask: {find: id => { const [tid, sid] = id.split(':'); const t = by(d.board?.tasks, tid);
+                              const st = t && by(t.subtasks, sid); return st && {...st, task_id: tid}; },
+             title: o => o.title, schema:'SubtaskUpdate',
+             url: id => { const [tid, sid] = id.split(':'); return `/api/tasks/${encodeURIComponent(tid)}/subtasks/${encodeURIComponent(sid)}`; },
+             extra: o => [{label: o.done ? 'Mark not done' : 'Mark done', emoji: o.done ? '↺' : '✓', fn: () => this.toggleSubtask(o.task_id, o.id, !o.done)},
+                          {label:'Delete step', emoji:'🗑', danger:true, fn: () => this.removeSubtask(o.task_id, o.id)}]},
+      event: {find: id => by(d.board?.events, id) || by(d.timeline, id) || by(this.timelineCache, id), title: o => o.title,
+             schema:'EventUpdate', url: id => `/api/events/${encodeURIComponent(id)}`, del:true},
+      knote: {find: id => (d.knowledge?.recent || []).find(x => (x.path || x.title) === id), title: o => o.title,
+             extra: o => o.path ? [{label:'Copy vault path', emoji:'📁', fn: () => this.ctxCopy(o.path)}] : []},
+      // Alerts and Your Business notices are acknowledged, never deleted.
+      alert: {find: id => by(this.openAlerts, id), title: o => o.title,
+             extra: o => [{label:'Acknowledge', emoji:'✓', fn: () => this.ack(o.id)}]},
+      bridge: {find: id => by(d.bridge, id), title: o => o.title,
+             extra: o => [...(o.read ? [] : [{label:'Mark read', emoji:'✉️', fn: () => this.readMsg(o.id)}]),
+                          {label:'Mark all read', emoji:'✉️', fn: () => this.readAll()}]},
+    };
   },
 
-  subtaskMenu(ev, taskId, subtaskId){
-    const t = ((this.data.board || {}).tasks || []).find(x => x.id === taskId);
-    const s = t && (t.subtasks || []).find(x => x.id === subtaskId);
-    if (!s) return;
-    this.openCtx(ev, s.title, [
-      {label: s.done ? 'Mark not done' : 'Mark done', emoji: s.done ? '↺' : '✓',
-       fn: () => this.toggleSubtask(taskId, subtaskId, !s.done)},
-      {label:'Rename…', emoji:'✏️', fn: () => this.renameSubtask(taskId, subtaskId, s.title)},
-      {sep:true},
-      {label:'Delete step', emoji:'🗑', danger:true, fn: () => this.removeSubtask(taskId, subtaskId)},
-    ]);
+  /* "New …" from a right-clicked section heading (data-ctx-add="<type>" or
+     "<type>:<arg>"). Same schema-built form, from the …Create model. */
+  ctxCreates(){
+    return {
+      deal: arg => ({label:'deal', schema:'DealCreate', url:'/api/biz/deals', defaults:{division_id: arg || 'consultations'}}),
+      annotation: () => ({label:'annotation', schema:'AnnotationCreate', url:'/api/biz/annotations', defaults:{}}),
+      job: () => ({label:'application', schema:'JobApplicationCreate', url:'/api/jobs', defaults:{}}),
+      aiservice: () => ({label:'AI service', schema:'AiServiceCreate', url:'/api/money/ai-stack', defaults:{}}),
+      debt: () => ({label:'debt', schema:'DebtCreate', url:'/api/finance/debts', defaults:{}}),
+      investment: () => ({label:'investment account', schema:'InvestmentAccountCreate', url:'/api/finance/investments', defaults:{}}),
+      goal: () => ({label:'goal', schema:'InvestmentGoalCreate', url:'/api/finance/goals', defaults:{}}),
+      fnote: () => ({label:'account note', schema:'FinanceNoteCreate', url:'/api/finance/notes', defaults:{}}),
+      caccount: () => ({label:'credit account', schema:'CreditAccountCreate', url:'/api/credit/accounts', defaults:{}}),
+      dispute: () => ({label:'dispute', schema:'CreditDisputeCreate', url:'/api/credit/disputes', defaults:{}}),
+      emailrule: () => ({label:'email rule', schema:'EmailRuleCreate', url:'/api/email/rules', defaults:{}}),
+      // arg is a day (calendar cell) or a status (board column).
+      task: arg => ({label:'task', schema:'TaskCreate', url:'/api/tasks',
+                     defaults: /^\d{4}-\d{2}-\d{2}$/.test(arg || '') ? {due_date: arg} : arg ? {status: arg} : {}}),
+      event: arg => ({label:'event', schema:'EventCreate', url:'/api/events', defaults:{date: arg || localISO()}}),
+    };
   },
 
-  eventMenu(ev, id){
-    const e = ((this.data.board || {}).events || []).find(x => x.id === id)
-           || (this.data.timeline || []).find(x => x.id === id);
+  /* The contextmenu listener for tagged items. Returns true when it opened. */
+  ctxOpenFor(ev){
+    const el = ev.target.closest && ev.target.closest('[data-ctx]');
+    if (!el){
+      const add = ev.target.closest && ev.target.closest('[data-ctx-add]');
+      if (!add || ev.target.closest('input, textarea, select, [contenteditable]')) return false;
+      const items = add.dataset.ctxAdd.split(',').map(entry => {
+        const [type, arg] = entry.split(':');
+        const make = this.ctxCreates()[type];
+        if (!make) return null;
+        const c = make(arg);
+        return {label:`New ${c.label}…`, emoji:'➕', fn: () => this.ctxEdit(type, null, c)};
+      }).filter(Boolean);
+      if (!items.length) return false;
+      this.openCtx(ev, null, items);
+      return true;
+    }
+    // Inputs keep the browser's own menu (paste, spellcheck).
+    if (ev.target.closest('input, textarea, select, [contenteditable]')) return false;
+    const [type, ...rest] = el.dataset.ctx.split(':');
+    const id = rest.join(':');
+    const spec = this.ctxTypes()[type];
+    const o = spec && spec.find(id);
+    if (!o) return false;
+    this.openCtx(ev, spec.title(o), this.ctxItemsFor(type, id, o, spec));
+    return true;
+  },
+
+  ctxItemsFor(type, id, o, spec){
+    const items = [];
+    if (spec.schema) items.push({label:'Edit…', emoji:'✏️', fn: () => this.ctxEdit(type, id)});
+    const quick = [];
+    for (const field of spec.quick || []){
+      const choices = this._enumOf(spec.schema, field);
+      if (!choices) continue;
+      for (const v of choices){
+        if (v === o[field]) continue;
+        quick.push({label: `${field.replace(/_/g,' ')} → ${String(v).replace(/_/g,' ')}`, emoji:'→',
+                    fn: () => this.ctxPatch(type, id, {[field]: v})});
+      }
+    }
+    if (quick.length) items.push({sep:true}, ...quick);
+    const extra = spec.extra ? spec.extra(o) : [];
+    const url = spec.link ? spec.link(o) : '';
+    const text = spec.title(o);
+    if (extra.length || url || text) items.push({sep:true});
+    items.push(...extra);
+    if (url) items.push({label:'Open link', emoji:'↗', fn: () => this.openInOpera(url)});
+    if (text) items.push({label:'Copy name', emoji:'⧉', fn: () => this.ctxCopy(text)});
+    if (spec.del) items.push({sep:true}, {label:'Delete', emoji:'🗑', danger:true, fn: () => this.ctxDelete(type, id)});
+    return items;
+  },
+
+  ctxCopy(text){
+    (navigator.clipboard?.writeText(text) || Promise.reject())
+      .then(() => this.toast('Copied.'), () => this.toast('Copy failed.'));
+  },
+
+  async ctxPatch(type, id, body){
+    const spec = this.ctxTypes()[type];
+    try {
+      await api(spec.url(id), {method:'PATCH', body: JSON.stringify(body)});
+      await this.load({quiet:true});
+    } catch (err) { this.toast('Could not save: ' + err.message); }
+  },
+  async ctxPost(url){
+    try { await api(url, {method:'POST'}); await this.load({quiet:true}); }
+    catch (err) { this.toast('Could not do that: ' + err.message); }
+  },
+
+  /* ---- schema-driven editor ---- */
+  _openapi: null,
+  async _schemas(){
+    if (!this._openapi) this._openapi = await api('/openapi.json');
+    return this._openapi.components?.schemas || {};
+  },
+  // The one field shape the quick-set menu needs, read without a fetch when
+  // the spec is already cached; the first right-click warms it.
+  _enumOf(schemaName, field){
+    const sch = this._openapi?.components?.schemas?.[schemaName];
+    if (!sch) { this._schemas().catch(() => {}); return null; }
+    const p = this._unwrap(sch.properties?.[field]);
+    return p && p.enum ? p.enum : null;
+  },
+  _unwrap(prop){
+    if (!prop) return null;
+    const alts = prop.anyOf || prop.oneOf;
+    if (alts){
+      const real = alts.find(a => a.type !== 'null') || {};
+      const refd = real.$ref ? this._openapi.components.schemas[real.$ref.split('/').pop()] : real;
+      return {...refd, title: prop.title, nullable: alts.some(a => a.type === 'null'), description: prop.description};
+    }
+    if (prop.$ref) return {...this._openapi.components.schemas[prop.$ref.split('/').pop()], title: prop.title};
+    return prop;
+  },
+  _fieldKind(name, p){
+    if (p.enum) return 'enum';
+    if (p.type === 'boolean') return 'bool';
+    if (p.type === 'number' || p.type === 'integer') return 'number';
+    if (/(^|_)(on|date)$|_date$/.test(name) || p.format === 'date') return 'date';
+    if (name === 'time') return 'time';
+    if (/^(notes|body|thesis|detail|text|note|tagline|description)$/.test(name)) return 'textarea';
+    return 'text';
+  },
+  // Fields that exist for machines, not people.
+  _SKIP_FIELDS: new Set(['base_updated_at', 'forget', 'agent', 'agent_reason']),
+
+  _editCtx: null,
+  async ctxEdit(type, id, create){
+    const spec = create ? {schema: create.schema, title: () => 'New ' + create.label} : this.ctxTypes()[type];
+    const o = create ? {...create.defaults} : spec.find(id);
+    if (!o) return;
+    let schemas;
+    try { schemas = await this._schemas(); }
+    catch (err) { return this.toast('Could not load the form: ' + err.message); }
+    const sch = schemas[spec.schema];
+    if (!sch) return this.toast('No edit form for ' + type + '.');
+    const fields = Object.entries(sch.properties || {})
+      .filter(([k]) => !this._SKIP_FIELDS.has(k))
+      .map(([k, raw]) => { const p = this._unwrap(raw); return {k, p, kind: this._fieldKind(k, p)}; });
+    const required = new Set(sch.required || []);
+    this._editCtx = {type, id, fields, original: o, create};
+    const val = k => o[k] == null ? '' : o[k];
+    const input = ({k, p, kind}) => {
+      const common = `id="ce-${k}" class="search" style="width:100%;box-sizing:border-box;padding:9px 10px;font-family:var(--sans)"`;
+      if (kind === 'enum') return `<select ${common}>${p.nullable ? '<option value="">—</option>' : ''}
+          ${p.enum.map(v => `<option value="${esc(v)}" ${String(val(k)) === String(v) ? 'selected' : ''}>${esc(String(v).replace(/_/g,' '))}</option>`).join('')}</select>`;
+      if (kind === 'bool') return `<select ${common}><option value="true" ${o[k] === true ? 'selected' : ''}>yes</option>
+          <option value="false" ${o[k] === false ? 'selected' : ''}>no</option></select>`;
+      if (kind === 'textarea') return `<textarea ${common} rows="4" style="resize:vertical">${esc(val(k))}</textarea>`;
+      const type = kind === 'number' ? 'number" step="any' : kind === 'date' ? 'date' : kind === 'time' ? 'time' : 'text';
+      return `<input ${common} type="${type}" value="${esc(val(k))}">`;
+    };
+    $('ctxEditBody').innerHTML = `
+      <div class="modalhead"><h2 style="margin:0">${create ? '' : 'Edit · '}${esc(spec.title(o))}</h2>
+        <button class="chip" style="cursor:pointer" onclick="App.ctxEditClose()">close</button></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+        ${fields.map(fd => `<label style="display:flex;flex-direction:column;gap:6px;${fd.kind === 'textarea' ? 'grid-column:1/-1' : ''}">
+          <span class="lbl tiny">${esc((fd.p.title || fd.k).toUpperCase())}${required.has(fd.k) ? ' *' : ''}</span>${input(fd)}</label>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+        <button class="chip" style="cursor:pointer" onclick="App.ctxEditClose()">Cancel</button>
+        <button class="ack" style="margin:0" onclick="App.ctxEditSave()">${create ? 'Create' : 'Save'}</button>
+      </div>`;
+    $('ctxEdit').hidden = false;
+    requestAnimationFrame(() => $('ctxEditBody').querySelector('input,select,textarea')?.focus());
+  },
+  ctxEditClose(ev){
+    if (ev && ev.target !== $('ctxEdit')) return;
+    $('ctxEdit').hidden = true;
+    this._editCtx = null;
+  },
+  async ctxEditSave(){
+    const e = this._editCtx;
     if (!e) return;
-    this.openCtx(ev, e.title, [
-      {label:'Rename…', emoji:'✏️', fn: () => this.renameEvent(id, e.title)},
-      {label:'Change date…', emoji:'📅', fn: () => this.rescheduleEvent(id, e.date)},
-      {label:'Change time…', emoji:'⏰', fn: () => this.retimeEvent(id, e.time)},
-      {sep:true},
-      {label:'Delete event', emoji:'🗑', danger:true, fn: () => this.deleteEvent(id, e.title)},
-    ]);
+    const body = {};
+    for (const {k, p, kind} of e.fields){
+      const el = $('ce-' + k);
+      if (!el) continue;
+      const raw = el.value;
+      let v;
+      if (kind === 'bool') v = raw === 'true';
+      else if (kind === 'number') v = raw.trim() === '' ? null : Number(raw);
+      else if (raw === '' && (p.nullable && (kind === 'date' || kind === 'enum'))) v = null;
+      else v = raw;
+      if (kind === 'number' && v !== null && !Number.isFinite(v)) return this.toast((p.title || k) + ' needs a number.');
+      const before = e.original[k] == null ? null : e.original[k];
+      if (e.create ? (v !== null && v !== '') : String(v ?? '') !== String(before ?? '')) body[k] = v;
+    }
+    if (!Object.keys(body).length) return this.ctxEditClose();
+    try {
+      if (e.create) await api(e.create.url, {method:'POST', body: JSON.stringify(body)});
+      else await api(this.ctxTypes()[e.type].url(e.id), {method:'PATCH', body: JSON.stringify(body)});
+      this.ctxEditClose();
+      await this.load({quiet:true});
+      this.toast('Saved.');
+    } catch (err) { this.toast('Could not save: ' + err.message); }
+  },
+
+  /* ---- delete with undo ----
+     The row disappears at once and the DELETE waits six seconds. A CSS rule,
+     not a DOM removal, hides it, so a background re-render can't bring it
+     back mid-undo. Leaving the page sends whatever is still waiting
+     (keepalive), so a delete is never silently lost. */
+  _pendingDeletes: {},
+  _paintHidden(){
+    let st = $('ctxHide');
+    if (!st){ st = document.createElement('style'); st.id = 'ctxHide'; document.head.appendChild(st); }
+    st.textContent = Object.keys(this._pendingDeletes)
+      .map(key => `[data-ctx="${CSS.escape(key)}"]`).join(',') + (Object.keys(this._pendingDeletes).length ? '{display:none!important}' : '');
+  },
+  ctxDelete(type, id){
+    const spec = this.ctxTypes()[type];
+    const o = spec.find(id);
+    if (!o) return;
+    const key = type + ':' + id;
+    const url = spec.delUrl ? spec.delUrl(o) : spec.url(id);
+    const commit = async () => {
+      const job = this._pendingDeletes[key];
+      if (!job) return;
+      try {
+        const res = await fetch(API + url, {method:'DELETE', keepalive:true});
+        if (!res.ok && res.status !== 404) throw new Error(res.status + ' ' + res.statusText);
+        delete this._pendingDeletes[key];
+        await this.load({quiet:true});
+      } catch (err) {
+        delete this._pendingDeletes[key];
+        this.toast('Delete failed: ' + err.message);
+      }
+      this._paintHidden();
+    };
+    this._pendingDeletes[key] = {url, timer: setTimeout(commit, 6000)};
+    this._paintHidden();
+    this.undoToast(`Deleted ${spec.title(o)}`, () => {
+      clearTimeout(this._pendingDeletes[key]?.timer);
+      delete this._pendingDeletes[key];
+      this._paintHidden();
+    });
+  },
+  flushDeletes(){
+    for (const [key, job] of Object.entries(this._pendingDeletes)){
+      clearTimeout(job.timer);
+      fetch(API + job.url, {method:'DELETE', keepalive:true}).catch(() => {});
+      delete this._pendingDeletes[key];
+    }
+  },
+  undoToast(msg, onUndo){
+    this.toast(msg);
+    const el = $('toast');
+    if (!el) return;
+    const btn = document.createElement('button');
+    btn.textContent = 'Undo';
+    btn.className = 'chip';
+    btn.style.cssText = 'cursor:pointer;margin-left:10px;color:#ffd79a';
+    btn.onclick = () => { onUndo(); el.hidden = true; };
+    el.appendChild(btn);
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => { el.hidden = true; }, 6000);
   },
 
   /* --- the prompts behind the menu items --- */
@@ -3883,7 +4216,7 @@ const App = {
       const pct = v.monthly_target ? Math.min(100, Math.round((v.attainment || 0) * 100)) : 0;
       const where = v.vault_path || v.repo_path;
       const open = this.editing === v.id;
-      return `<div class="row" style="flex-direction:column;align-items:stretch;gap:0">
+      return `<div data-ctx="venture:${esc(v.id)}" class="row" style="flex-direction:column;align-items:stretch;gap:0">
         <div style="display:flex;align-items:flex-start;gap:12px">
           <span style="font-size:20px;flex-shrink:0">${v.emoji}</span>
           <div style="flex:1;min-width:0">
@@ -3955,7 +4288,7 @@ const App = {
     }).join('');
 
     const events = m.recent_events.length ? m.recent_events.map(e => `
-      <div class="listrow">
+      <div data-ctx="vevent:${e.id}" class="listrow">
         <div><div style="font-size:13px">${esc(e.label)}</div>
           <div class="tiny" style="margin-top:2px">${esc(e.venture_id)} · ${esc(e.kind)}</div></div>
         <span class="mono" style="color:${e.kind==='expense'?'#ff2d3d':'#34d399'}">${e.kind==='expense'?'-':'+'}${money(e.amount)}</span>
@@ -3977,7 +4310,7 @@ const App = {
 
     const rows = a.services.map(s => {
       const priced = s.cost > 0 || s.billing === 'free';
-      return `<div class="listrow">
+      return `<div data-ctx="aiservice:${s.id}" class="listrow">
         <div style="min-width:0">
           <div style="font-size:13px">${esc(s.name)}${s.is_active ? '' : ' <span class="tiny" style="color:#5c5659">(inactive)</span>'}</div>
           <div class="tiny" style="margin-top:2px">${esc(s.provider || s.kind)} · ${esc(s.billing)}</div>
@@ -4003,7 +4336,7 @@ const App = {
       : '';
 
     return `<div class="card">
-      <div class="cardhead"><h2>AI Stack</h2>
+      <div class="cardhead" data-ctx-add="aiservice"><h2>AI Stack</h2>
         <span class="mono" style="font-size:15px">${money(a.monthly_total)}<span style="color:#726c6f">/mo · ${money(a.annual_total)}/yr</span></span></div>
       <div style="display:flex;gap:18px;flex-wrap:wrap;padding:2px 0 10px">
         <div><span class="lbl tiny">FIXED</span>
@@ -4120,7 +4453,7 @@ const App = {
     const debts = (f.debts || []).length ? f.debts.map(d => {
       const pct = Math.round((d.progress || 0) * 100);
       const paid = d.status === 'paid';
-      return `<div class="row" style="align-items:flex-start">
+      return `<div data-ctx="debt:${d.id}" class="row" style="align-items:flex-start">
         ${dot(paid ? C.health.green : d.days_overdue ? C.sev.warning : C.health.unknown)}
         <div style="flex:1;min-width:0">
           <div style="font-size:14px;font-weight:600;${paid?'text-decoration:line-through;color:#726c6f':''}">${esc(d.creditor)}</div>
@@ -4153,7 +4486,7 @@ const App = {
       </div>` : '<div class="empty">Set a monthly payment above to project payoff dates.</div>';
 
     const accounts = (f.investment_accounts || []).length ? f.investment_accounts.map(a => `
-      <div class="row">
+      <div data-ctx="investment:${a.id}" class="row">
         ${dot(C.health.green)}
         <div style="flex:1;min-width:0">
           <div style="font-size:14px;font-weight:600">${esc(a.name)}</div>
@@ -4166,7 +4499,7 @@ const App = {
       </div>`).join('') : '<div class="empty">No accounts tracked. Balances are entered by hand — nothing is fetched.</div>';
 
     const goals = (f.investment_goals || []).length ? f.investment_goals.map(g => `
-      <div class="row" style="align-items:flex-start">
+      <div data-ctx="goal:${g.id}" class="row" style="align-items:flex-start">
         ${dot(g.on_track === true ? C.health.green : g.on_track === false ? C.sev.warning : C.health.unknown)}
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:600">${esc(g.name)}</div>
@@ -4178,7 +4511,7 @@ const App = {
       </div>`).join('') : '<div class="empty">No goals set.</div>';
 
     const notes = (this.data.notes || []).length ? this.data.notes.map(n => `
-      <div class="row" style="align-items:flex-start">
+      <div data-ctx="fnote:${n.id}" class="row" style="align-items:flex-start">
         ${dot(n.pinned ? C.module.finance : C.health.unknown)}
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:600">${n.pinned ? '📌 ' : ''}${esc(n.title)}</div>
@@ -4197,7 +4530,7 @@ const App = {
       ${overdue}${nextMove}
 
       <section class="card">
-        <div class="cardhead"><h2>Debts</h2>
+        <div class="cardhead" data-ctx-add="debt"><h2>Debts</h2>
           <span class="tiny">${money(f.total_debt)} outstanding</span></div>
         ${debts}
       </section>
@@ -4217,7 +4550,7 @@ const App = {
       </section>
 
       <section class="card">
-        <div class="cardhead"><h2>Accounts &amp; goals</h2>
+        <div class="cardhead" data-ctx-add="investment,goal"><h2>Accounts &amp; goals</h2>
           <span class="tiny">manual balances — no market data in v1</span></div>
         ${accounts}
         <div style="height:10px"></div>
@@ -4225,7 +4558,7 @@ const App = {
       </section>
 
       <section class="card">
-        <div class="cardhead"><h2>Notes</h2>
+        <div class="cardhead" data-ctx-add="fnote"><h2>Notes</h2>
           <span class="tiny">accounts opened, terms worth remembering</span></div>
         ${notes}
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;padding:14px 0 4px">
@@ -4395,7 +4728,7 @@ const App = {
       const clock = d.sent_on === null ? '<span style="color:#5c5659">not sent</span>'
         : late ? `<span style="color:${C.sev.critical}">${Math.abs(d.days_remaining)}d overdue</span>`
         : `<span style="color:${C.health.yellow}">${d.days_remaining}d left</span>`;
-      return `<div class="row" style="align-items:flex-start">
+      return `<div data-ctx="dispute:${d.id}" class="row" style="align-items:flex-start">
         ${dot(late ? C.sev.critical : d.sent_on ? C.health.yellow : C.health.unknown)}
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:600">${esc(d.item)}</div>
@@ -4413,7 +4746,7 @@ const App = {
 
     const accounts = (c.accounts || []).length ? c.accounts.map(a => {
       const pct = Math.round((a.utilization || 0) * 100);
-      return `<div class="row" style="align-items:flex-start">
+      return `<div data-ctx="caccount:${a.id}" class="row" style="align-items:flex-start">
         ${dot(a.is_active ? C.health.green : C.health.unknown)}
         <div style="flex:1;min-width:0">
           <div style="font-size:14px;font-weight:600">${esc(a.account_name)}</div>
@@ -4433,7 +4766,7 @@ const App = {
     }).join('') : '<div class="empty">No accounts yet — the plan below opens the first one.</div>';
 
     const steps = (c.next_steps || []).length ? c.next_steps.map(s => `
-      <div class="row" style="align-items:flex-start">
+      <div data-ctx="cstep:${s.id}" class="row" style="align-items:flex-start">
         ${dot(C.module.money)}
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:600">${esc(s.title)}</div>
@@ -4460,13 +4793,13 @@ const App = {
       </section>
 
       <section class="card">
-        <div class="cardhead"><h2>Disputes</h2>
+        <div class="cardhead" data-ctx-add="dispute"><h2>Disputes</h2>
           <span class="tiny">bureau has 30 days to respond</span></div>
         ${disputes}
       </section>
 
       <section class="card">
-        <div class="cardhead"><h2>Accounts</h2>
+        <div class="cardhead" data-ctx-add="caccount"><h2>Accounts</h2>
           <span class="tiny">${c.accounts.length} tracked</span></div>
         ${accounts}
       </section>
@@ -4583,7 +4916,7 @@ const App = {
         </div>
       </div>`;
     };
-    const rows = j.applications.map(a => `<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)">
+    const rows = j.applications.map(a => `<div data-ctx="job:${a.id}" style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)">
         <div style="display:flex;align-items:flex-start;gap:10px">
           ${dot(STAT[a.status])}
           <div style="flex:1;min-width:0">
@@ -4604,7 +4937,7 @@ const App = {
       : '<div class="empty">No resume files found in Personal/areas/career.</div>';
     return `<div class="tiles">${tiles}</div>
       <div class="card">
-        <div class="cardhead"><h2>Applications — ${active} active</h2>
+        <div class="cardhead" data-ctx-add="job"><h2>Applications — ${active} active</h2>
           <button class="chip" style="cursor:pointer" onclick="App.jobsAdding=!App.jobsAdding;App.render()">${this.jobsAdding ? 'close' : '+ application'}</button></div>
         ${this.jobsAdding ? form(null) : ''}
         ${rows || (this.jobsAdding ? '' : '<div class="empty">No applications yet. Add the first one with + application.</div>')}
@@ -4645,7 +4978,7 @@ const App = {
       <div class="card">
         <h2 style="font-size:13px;font-family:var(--mono);letter-spacing:1px;color:#ff5b66;text-transform:uppercase">${esc(phase)}</h2>
         <div class="rowlist">${certs.map(c => `
-          <div class="row" style="flex-direction:column;align-items:stretch;gap:0">
+          <div data-ctx="cert:${esc(c.slug)}" class="row" style="flex-direction:column;align-items:stretch;gap:0">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
               <div style="min-width:0">
                 <div style="font-size:14px;font-weight:600">${esc(c.name)}${c.overridden ? ' <span class="tiny" style="color:#ff5b66">◆ set by you</span>' : ''}</div>
@@ -5040,7 +5373,7 @@ const App = {
   engineTabsHTML(){
     const current = this.chatEngine;
     return `<div class="filters" style="margin:0">
-      ${this.engineList().map(e => `<button class="${current===e.id?'on':''}"
+      ${this.engineList().map(e => `<button data-ctx="engine:${esc(e.id)}" class="${current===e.id?'on':''}"
         ${e.available === false ? 'disabled title="not installed on this machine"' : ''}
         onclick="App.switchEngine('${esc(e.id)}')"
         style="${e.available === false ? 'opacity:.4;cursor:not-allowed' : ''}"
@@ -5052,7 +5385,7 @@ const App = {
     const sessions = this.data.chatSessions || [];
     const current = this.chatSession;
     return `<div class="filters" style="margin:0;flex-wrap:wrap">
-      ${sessions.map(s => `<button class="${current===s.id?'on':''}"
+      ${sessions.map(s => `<button data-ctx="session:${s.id}" class="${current===s.id?'on':''}"
           onclick="App.switchSession(${s.id})"
           ondblclick="App.renameSession(${s.id})"
           title="${esc(s.label)}${s.resumable ? ' — the agent remembers this thread' : ' — fresh, nothing remembered yet'}"
@@ -5398,7 +5731,7 @@ const App = {
     const cats = s.categories || [];
 
     const list = shown.length ? shown.map(m => `
-      <div class="row" style="flex-direction:column;align-items:stretch;gap:0;${m.is_vip?'border-color:rgba(255,45,61,.28);background:rgba(255,45,61,.04)':''}">
+      <div data-ctx="email:${esc(m.id)}" class="row" style="flex-direction:column;align-items:stretch;gap:0;${m.is_vip?'border-color:rgba(255,45,61,.28);background:rgba(255,45,61,.04)':''}">
         <div style="display:flex;align-items:flex-start;gap:12px">
           <span class="dot" style="background:${impColor[m.importance]};margin-top:6px"></span>
           <div style="flex:1;min-width:0">
@@ -5450,10 +5783,10 @@ const App = {
     const rules = this.data.rules || [];
     const rulesPanel = rules.length ? `
       <div class="card">
-        <div class="cardhead"><h2>Your corrections — ${rules.length}</h2>
+        <div class="cardhead" data-ctx-add="emailrule"><h2>Your corrections — ${rules.length}</h2>
           <span class="tiny">applied before anything is shown to you</span></div>
         <div class="rowlist">${rules.map(r => `
-          <div class="listrow">
+          <div data-ctx="emailrule:${r.id}" class="listrow">
             <div style="min-width:0">
               <div style="font-size:13px">
                 <span class="mono" style="color:#a78bfa">${esc(r.scope)}</span>
@@ -7089,7 +7422,7 @@ const App = {
         <div class="val" style="font-size:20px;margin-top:6px">${f.note_count}</div></div>`).join('');
 
     const recent = k.recent.map(n => `
-      <div class="listrow">
+      <div data-ctx="knote:${esc(n.path || n.title)}" class="listrow">
         <div style="min-width:0"><div style="font-size:13px">${esc(n.title)}</div>
           ${n.excerpt ? `<div class="snippet">${esc(n.excerpt)}</div>` : ''}</div>
         <span class="tiny" style="flex-shrink:0">${esc(n.folder)}</span>
@@ -7192,7 +7525,7 @@ const App = {
       onclick="App.setAnnFilter('${key}')">${label}${n ? ` <span style="opacity:.6">${n}</span>` : ''}</button>`;
 
     const head = `<div class="card">
-      <div class="cardhead"><h2>Annotations</h2>
+      <div class="cardhead" data-ctx-add="annotation"><h2>Annotations</h2>
         <span class="tiny">${all.length} compan${all.length === 1 ? 'y' : 'ies'} · ${openCount} still open</span></div>
       <div class="tiny" style="margin-bottom:10px;color:#8a8386">
         Who you're signed up with and what's unfinished with each. Hermes fills
@@ -7215,7 +7548,7 @@ const App = {
 
     const body = rows.map(a => {
       const colour = ANNOTATION_STATUS_COLOR[a.status] || '#726c6f';
-      return `<div class="row">
+      return `<div data-ctx="annotation:${a.id}" class="row">
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <span style="font-size:13px;font-weight:600">${esc(a.company)}</span>
@@ -7291,7 +7624,7 @@ const App = {
 
     const cards = k.divisions.map(d => {
       const pct = d.monthly_target ? Math.min(100, Math.round((d.attainment || 0) * 100)) : 0;
-      return `<div class="row" style="align-items:flex-start;gap:12px;cursor:pointer"
+      return `<div data-ctx="division:${esc(d.id)}" class="row" style="align-items:flex-start;gap:12px;cursor:pointer"
                    onclick="App.setBizTab('${d.id}')">
         <span style="font-size:20px;flex-shrink:0">${d.emoji}</span>
         <div style="flex:1;min-width:0">
@@ -7319,7 +7652,7 @@ const App = {
 
     const recent = (k.recent_deals || []).length
       ? `<div class="card"><h2>Recent deals</h2><div class="rowlist">${
-          k.recent_deals.map(d => `<div class="row">
+          k.recent_deals.map(d => `<div data-ctx="deal:${d.id}" class="row">
             <div style="flex:1;min-width:0">
               <div style="font-size:13px;font-weight:600">${esc(d.client)}</div>
               <div class="tiny" style="margin-top:2px">${esc(d.division_id)}${d.title ? ' · ' + esc(d.title) : ''}</div>
@@ -7336,7 +7669,7 @@ const App = {
     const openAnns = anns.filter(a => ['needs_finish', 'blocked'].includes(a.status));
     const annBody = anns.length
       ? (openAnns.length
-          ? `<div class="rowlist">${openAnns.map(a => `<div class="row" style="cursor:pointer"
+          ? `<div class="rowlist">${openAnns.map(a => `<div data-ctx="annotation:${a.id}" class="row" style="cursor:pointer"
                  onclick="App.setBizTab('annotations')">
               <div style="flex:1;min-width:0">
                 <div style="font-size:13px;font-weight:600">${esc(a.company)}</div>
@@ -7373,7 +7706,7 @@ const App = {
     const HEALTHS = ['unknown','green','yellow','red'];
     const pct = d.monthly_target ? Math.min(100, Math.round((d.attainment || 0) * 100)) : 0;
 
-    const header = `<div class="card">
+    const header = `<div class="card" data-ctx="division:${esc(d.id)}">
       <div style="display:flex;align-items:flex-start;gap:12px">
         <span style="font-size:26px;flex-shrink:0">${d.emoji}</span>
         <div style="flex:1;min-width:0">
@@ -7429,7 +7762,7 @@ const App = {
     </div>`;
 
     const streams = d.ventures.length
-      ? `<div class="rowlist">${d.ventures.map(v => `<div class="row">
+      ? `<div class="rowlist">${d.ventures.map(v => `<div data-ctx="venture:${esc(v.id)}" class="row">
           <span style="font-size:18px;flex-shrink:0">${v.emoji}</span>
           <div style="flex:1;min-width:0">
             <div style="font-size:13px;font-weight:600">${esc(v.name)}</div>
@@ -7448,7 +7781,7 @@ const App = {
       if (!rows.length) return '';
       return `<div style="margin-top:10px">
         <div class="lbl tiny" style="color:${C.deal[stage]}">${stage.toUpperCase()} — ${rows.length}</div>
-        <div class="rowlist" style="margin-top:6px">${rows.map(x => `<div class="row">
+        <div class="rowlist" style="margin-top:6px">${rows.map(x => `<div data-ctx="deal:${x.id}" class="row">
           <div style="flex:1;min-width:0">
             <div style="font-size:13px;font-weight:600">${esc(x.client)}</div>
             ${x.title ? `<div class="tiny" style="margin-top:2px">${esc(x.title)}</div>` : ''}
@@ -7473,7 +7806,7 @@ const App = {
     const adding = this.addingDeal === d.id;
     const pipeline = `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <h2 style="margin:0">Pipeline — ${money(d.pipeline_value)} open</h2>
+        <h2 style="margin:0" data-ctx-add="deal:${esc(d.id)}">Pipeline — ${money(d.pipeline_value)} open</h2>
         <button class="ack" style="margin:0" onclick="App.toggleAddDeal('${d.id}')">
           ${adding ? 'Cancel' : '+ deal'}</button>
       </div>
@@ -7656,7 +7989,7 @@ const App = {
       <button class="ack" style="margin-top:8px" onclick="App.saveFreightDaily()">Save day</button>
       ${t.daily.length ? `<div style="overflow-x:auto;margin-top:12px"><table class="mono" style="width:100%;font-size:11px;border-collapse:collapse">
         <tr style="color:#726c6f;text-align:left"><th>DAY</th><th>CALLS</th><th>CARR+</th><th>SHIP</th><th>LOADS</th><th>REV</th><th>MARGIN</th><th></th></tr>
-        ${t.daily.slice(0,14).map(d => `<tr style="border-top:1px solid rgba(255,255,255,.05)">
+        ${t.daily.slice(0,14).map(d => `<tr data-ctx="fday:${d.day}" style="border-top:1px solid rgba(255,255,255,.05)">
           <td style="padding:6px 4px">${d.day.slice(5)}</td><td>${d.calls}</td><td>${d.carriers_added}</td><td>${d.shippers_contacted}</td>
           <td>${d.loads_booked}</td><td>${money(d.revenue)}</td><td style="color:${d.margin>0?'#34d399':'#a79fa1'}">${money(d.margin)}</td>
           <td style="text-align:right"><button class="chip" style="cursor:pointer" onclick="App.freightEditDay('${d.day}')">edit</button></td></tr>`).join('')}
@@ -7681,7 +8014,7 @@ const App = {
         <input id="fl-amount" class="search" type="number" step="1" style="padding:8px" placeholder="$ (optional)">
       </div>
       <button class="ack" style="margin-top:8px" onclick="App.addFreightLog()">+ Log it</button>
-      ${t.log.length ? `<div class="rowlist" style="margin-top:12px">${t.log.slice(0,40).map(e => `<div class="row">
+      ${t.log.length ? `<div class="rowlist" style="margin-top:12px">${t.log.slice(0,40).map(e => `<div data-ctx="flog:${e.id}" class="row">
           <span class="mono" style="font-size:10px;color:#726c6f;flex-shrink:0;width:42px">${e.day.slice(5)}</span>
           <span class="mono" style="font-size:9px;letter-spacing:1px;text-transform:uppercase;color:${KCOL[e.kind]};flex-shrink:0;width:70px">${e.kind}</span>
           <div style="flex:1;min-width:0">
@@ -7960,7 +8293,7 @@ const App = {
 
     const feed = escalations.length
       ? `<div class="rowlist">${escalations.slice(0, 20).map(b => `
-          <div class="row" style="cursor:pointer;${b.read?'':'background:rgba(255,45,61,.05)'}"
+          <div data-ctx="bridge:${b.id}" class="row" style="cursor:pointer;${b.read?'':'background:rgba(255,45,61,.05)'}"
                onclick="App.readMsg(${b.id})">
             <div style="flex:1;min-width:0">
               <div style="font-size:13px;font-weight:600">${esc(b.title)}</div>
@@ -8005,7 +8338,7 @@ const App = {
       <div style="display:flex;justify-content:flex-end">
         <button class="ack" onclick="App.readAll()">Mark all read</button></div>
       ${msgs.map(b => `
-        <div style="padding:16px;border-radius:14px;cursor:pointer;
+        <div data-ctx="bridge:${b.id}" style="padding:16px;border-radius:14px;cursor:pointer;
           background:${b.read?'rgba(255,255,255,.015)':'rgba(255,45,61,.05)'};
           border:1px solid ${b.read?'rgba(255,255,255,.06)':'rgba(255,45,61,.2)'}"
           onclick="App.readMsg(${b.id})">

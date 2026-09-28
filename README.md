@@ -28,6 +28,7 @@ Record one sale and every total updates. Name it after your company. It's yours.
 ## Everything else, built in.
 
 - **Command Deck.** Your whole day in one call: focus, tasks, alerts, the agent fleet and money.
+- **Right-click anything.** Tasks, events, deals, debts, agents: right-click to edit, flip a status in one click, or delete with a six-second undo. Every edit form is built from the API's own schema, so a new kind of item needs one registry line and no form code.
 - **Live, always.** A server-sent event stream keeps every screen current. No refresh button.
 - **Tasks & calendar** that write straight back to your Obsidian vault.
 - **Money & finance.** Ventures, cash flow, a debt snowball/avalanche planner, and a credit-repair tracker with FCRA 30-day clocks.
