@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Notepad — Blanco OS</title>
+<meta name="theme-color" content="#070707">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* =====================================================================
+   Blanco OS — Notepad.
+   One implementation, two homes: the deck embeds this page in the floating
+   widget's iframe, and the ⧉ button opens the same URL as a detached window.
+   Nothing here may assume a parent frame.
+   ===================================================================== */
+:root{
+  --bg:#0b0708; --ink:#f4f1f0; --muted:#b6afb2; --faint:#8c8589;
+  --red:#ff2d3d; --accent-rgb:255,45,61;
+  --amber:#ffb020; --green:#34d399; --blue:#38bdf8; --violet:#a78bfa;
+  --line:rgba(255,255,255,.07);
+  --sans:'Space Grotesk',system-ui,-apple-system,sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  color-scheme:dark;
+}
+/* Matches the deck's black theme, mirrored here because the detached window
+   is a separate document and never inherits the deck's <html> attribute. */
+/* The pad only paints with two of the deck's tokens, so each skin here is the
+   two-line echo of the matching block in index.html. Keep the values in step
+   with that file — a skin added there but not here just falls back to red. */
+:root[data-theme="black"]{--red:#e6e6ea; --accent-rgb:225,225,232}
+:root[data-theme="ice"]  {--bg:#03080c; --red:#5ad8ff; --accent-rgb:90,216,255}
+:root[data-theme="toxic"]{--bg:#030805; --red:#3dff8f; --accent-rgb:61,255,143}
+:root[data-theme="vapor"]{--bg:#08030d; --red:#ff4fd8; --accent-rgb:255,79,216}
+:root[data-theme="gold"] {--bg:#0a0703; --red:#ffc23d; --accent-rgb:255,194,61}
+:root[data-theme="deep"] {--bg:#04050c; --red:#7c8cff; --accent-rgb:124,140,255}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13px;
+  -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input,textarea{font:inherit;color:inherit}
+::-webkit-scrollbar{width:7px;height:7px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(var(--accent-rgb),.25);border-radius:4px}
+[hidden]{display:none!important}
+
+/* ---- top bar ---- */
+.bar{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);
+  background:rgba(255,255,255,.02);flex-shrink:0}
+.bar .brand{font-family:var(--mono);font-size:10px;letter-spacing:1.6px;color:#8a8386;
+  text-transform:uppercase;white-space:nowrap}
+.icon{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:13px;
+  color:var(--muted);border:1px solid transparent;flex-shrink:0}
+.icon:hover{background:rgba(255,255,255,.06);color:var(--ink)}
+.icon.on{color:var(--amber);border-color:rgba(255,176,32,.35);background:rgba(255,176,32,.1)}
+.icon.danger:hover{color:#ff5b66;background:rgba(255,45,61,.1)}
+
+/* ---- body: rail + editor ---- */
+.wrap{flex:1;display:flex;min-height:0}
+.rail{width:186px;flex-shrink:0;border-right:1px solid var(--line);display:flex;flex-direction:column;
+  background:rgba(0,0,0,.22)}
+/* Under ~520px (the detached window's default) the rail would leave no room to
+   write, so it collapses to a drawer toggled by the ☰ button. */
+.rail.hide{display:none}
+.railtop{display:flex;gap:6px;padding:8px;border-bottom:1px solid var(--line)}
+.search{flex:1;min-width:0;padding:6px 9px;border-radius:8px;background:rgba(255,255,255,.04);
+  border:1px solid var(--line);font-size:12px;outline:none}
+.search:focus{border-color:rgba(var(--accent-rgb),.4)}
+.list{flex:1;overflow-y:auto;padding:6px}
+.item{width:100%;text-align:left;padding:8px 9px;border-radius:9px;border:1px solid transparent;
+  display:block;margin-bottom:3px;border-left:3px solid transparent}
+.item:hover{background:rgba(255,255,255,.04)}
+.item.on{background:rgba(var(--accent-rgb),.1);border-color:rgba(var(--accent-rgb),.22)}
+.item .t{font-size:12px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.item .p{font-size:11px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  margin-top:1px}
+.item .m{font-family:var(--mono);font-size:9px;color:#6d676a;margin-top:3px;letter-spacing:.4px}
+.pinmark{color:var(--amber);font-size:9px}
+
+.editor{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+.title{padding:10px 14px 6px;border:none;background:none;font-size:15px;font-weight:600;
+  outline:none;width:100%}
+.title::placeholder{color:#615b5e}
+.pad{flex:1;width:100%;resize:none;border:none;background:none;outline:none;padding:4px 14px 12px;
+  font-family:var(--mono);font-size:12.5px;line-height:1.75;color:#ded7d9;min-height:0}
+.pad::placeholder{color:#575154}
+.foot{display:flex;align-items:center;gap:10px;padding:6px 12px;border-top:1px solid var(--line);
+  font-family:var(--mono);font-size:10px;color:#6d676a;flex-shrink:0}
+.state{color:#6d676a;white-space:nowrap}
+.state.saving{color:var(--blue)}
+.state.saved{color:var(--green)}
+.state.error{color:#ff5b66}
+.swatches{display:flex;gap:4px;margin-left:auto}
+.sw{width:12px;height:12px;border-radius:50%;border:1px solid rgba(255,255,255,.18)}
+.sw.on{box-shadow:0 0 0 2px rgba(255,255,255,.28)}
+.empty{flex:1;display:grid;place-items:center;color:#6d676a;font-size:12px;text-align:center;padding:20px}
+/* Colour-coded left edge in the rail; the accent a note is tagged with. */
+.c-default{border-left-color:#4a4548}
+.c-red{border-left-color:#ff2d3d} .c-amber{border-left-color:#ffb020}
+.c-green{border-left-color:#34d399} .c-blue{border-left-color:#38bdf8}
+.c-violet{border-left-color:#a78bfa}
+@media (max-width:430px){ .rail{position:absolute;inset:0 auto 0 0;z-index:5;width:170px;
+  background:#0d0809;box-shadow:24px 0 40px rgba(0,0,0,.55)} }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <button class="icon" id="railBtn" onclick="Pad.toggleRail()" title="Notes list">☰</button>
+  <!-- Hidden inside the deck's panel: the panel's own grip already says
+       Notepad, and two identical title bars stacked read as a bug. -->
+  <span class="brand" id="brand">Notepad</span>
+  <button class="icon" onclick="Pad.newNote()" title="New note (Ctrl+Alt+N)">＋</button>
+  <button class="icon" id="pinBtn" onclick="Pad.togglePin()" title="Pin to the top">★</button>
+  <button class="icon" onclick="Pad.copy()" title="Copy this note">⧉</button>
+  <button class="icon danger" onclick="Pad.remove()" title="Delete this note">🗑</button>
+  <span style="flex:1"></span>
+  <!-- Detach and close are the panel's buttons when embedded, and the browser
+       window's own chrome when detached — so this bar carries neither. The
+       panel drives Pad.popOut() / Pad.close() through the frame. -->
+</div>
+
+<div class="wrap">
+  <aside class="rail" id="rail">
+    <div class="railtop">
+      <input class="search" id="q" placeholder="Search notes" oninput="Pad.paintList()" autocomplete="off">
+    </div>
+    <div class="list" id="list"></div>
+  </aside>
+  <section class="editor" id="editor">
+    <input class="title" id="title" placeholder="Untitled" oninput="Pad.dirty()" autocomplete="off">
+    <textarea class="pad" id="body" placeholder="Start typing — it saves itself."
+              oninput="Pad.dirty()" spellcheck="true"></textarea>
+    <div class="foot">
+      <span class="state" id="state">—</span>
+      <span id="chars"></span>
+      <span class="swatches" id="swatches"></span>
+    </div>
+  </section>
+</div>
+
+<script>
+/* The deck is served from the same origin, so a relative path is always right —
+   including inside the iframe and in the detached window. */
+const API = location.origin;
+const COLORS = {default:'#4a4548', red:'#ff2d3d', amber:'#ffb020',
+                green:'#34d399', blue:'#38bdf8', violet:'#a78bfa'};
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function ago(sql){
+  if (!sql) return '';
+  // SQLite hands back naive UTC ("2026-09-09 21:04:11").
+  const t = new Date(sql.replace(' ', 'T') + 'Z');
+  if (isNaN(t)) return '';
+  const s = Math.floor((Date.now() - t.getTime()) / 1000);
+  if (s < 45) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+
+async function api(path, opts){
+  const res = await fetch(API + path, {headers:{'content-type':'application/json'}, ...opts});
+  if (!res.ok){
+    const err = new Error((await res.json().catch(() => ({}))).detail || res.status + ' ' + res.statusText);
+    err.status = res.status;
+    throw err;
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+const Pad = {
+  notes: [],
+  id: null,
+  // The updated_at the editor is holding, sent back on every save so the other
+  // window's edit is a 409 instead of a silent overwrite.
+  base: null,
+  saveTimer: null,
+  pollTimer: null,
+  saving: false,
+  // A save queued while another is in flight — coalesced, not stacked.
+  again: false,
+  embedded: window.parent !== window,
+
+  async init(){
+    // The detached window is its own document, so it re-reads the deck's theme
+    // choice out of the shared localStorage rather than inheriting anything.
+    try {
+      // 'red' is what :root already holds, so only the other skins set the
+      // attribute. The list is checked rather than passed through, so a stale
+      // or junk stored value can't land the pad on a theme with no rules.
+      const SKINS = ['black', 'ice', 'toxic', 'vapor', 'gold', 'deep'];
+      const t = localStorage.getItem('blanco_os_theme');
+      if (SKINS.includes(t)) document.documentElement.setAttribute('data-theme', t);
+    } catch (err) { /* private mode — red theme is a fine default */ }
+
+    $('brand').hidden = this.embedded;
+    this.paintSwatches();
+    // Narrow window (the detached default is 520px): start with the rail out of
+    // the way so the page opens on the writing surface.
+    if (window.innerWidth < 430) $('rail').classList.add('hide');
+
+    await this.load(Number(new URLSearchParams(location.search).get('note')) || null);
+
+    // Saves are debounced, so a close mid-sentence would drop the last words.
+    window.addEventListener('beforeunload', () => this.flush(true));
+    // Two windows on one note: whichever regains focus re-reads the truth.
+    window.addEventListener('focus', () => this.refresh());
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) this.refresh();
+    });
+    document.addEventListener('keydown', e => this.key(e));
+    // A slow background pull, only while nothing is being typed — enough to
+    // notice the other window's edits without fighting the keyboard.
+    this.pollTimer = setInterval(() => {
+      if (!document.hidden && !this.typing() && !this.saveTimer) this.refresh();
+    }, 20000);
+  },
+
+  typing(){ return document.activeElement === $('body') || document.activeElement === $('title'); },
+  current(){ return this.notes.find(n => n.id === this.id) || null; },
+
+  /* ---- loading ---- */
+
+  async load(prefer){
+    try {
+      const data = await api('/api/notepad');
+      this.notes = data.notes || [];
+    } catch (err) {
+      this.setState('Offline — ' + err.message, 'error');
+      return;
+    }
+    if (!this.notes.length){
+      await this.newNote();
+      return;
+    }
+    const wanted = prefer || this.id || Number(localStorage.getItem('blanco_os_notepad_last')) || null;
+    const pick = this.notes.find(n => n.id === wanted) || this.notes[0];
+    this.open(pick.id);
+  },
+
+  /* A background re-read. Never touches the fields being typed into: the list
+     rail updates, the editor only reloads when the note it holds changed
+     underneath it and there is nothing unsaved to lose. */
+  async refresh(){
+    if (this.saving || this.saveTimer) return;
+    let data;
+    try { data = await api('/api/notepad'); }
+    catch (err) { return; }
+    this.notes = data.notes || [];
+    const live = this.current();
+    if (!live){ if (this.notes.length) this.open(this.notes[0].id); return; }
+    if (live.updated_at !== this.base && !this.typing()){
+      this.open(live.id);
+      this.setState('Reloaded — changed in another window');
+      return;
+    }
+    this.paintList();
+  },
+
+  open(id){
+    this.flush(true);                 // don't carry the last note's edits over
+    this.id = id;
+    const note = this.current();
+    if (!note) return;
+    this.base = note.updated_at;
+    $('title').value = note.title;
+    $('body').value = note.body;
+    try { localStorage.setItem('blanco_os_notepad_last', String(id)); } catch (err) {}
+    this.setState('Saved ' + ago(note.updated_at), 'saved');
+    this.paint();
+    if (window.innerWidth < 430) $('rail').classList.add('hide');
+  },
+
+  /* ---- painting ---- */
+
+  paint(){
+    this.paintList();
+    this.paintSwatches();
+    const note = this.current();
+    $('pinBtn').classList.toggle('on', !!(note && note.pinned));
+    $('chars').textContent = $('body').value.length + ' chars';
+  },
+
+  paintList(){
+    const q = ($('q').value || '').trim().toLowerCase();
+    const shown = q
+      ? this.notes.filter(n => (n.title + ' ' + n.body).toLowerCase().includes(q))
+      : this.notes;
+    $('list').innerHTML = shown.length ? shown.map(n => `
+      <button class="item c-${esc(n.color)}${n.id === this.id ? ' on' : ''}"
+              onclick="Pad.open(${n.id})">
+        <div class="t">${n.pinned ? '<span class="pinmark">★</span> ' : ''}${
+          esc(n.title || n.preview || 'Untitled')}</div>
+        ${n.title && n.preview ? `<div class="p">${esc(n.preview)}</div>` : ''}
+        <div class="m">${esc(ago(n.updated_at))}</div>
+      </button>`).join('')
+      : '<div class="empty" style="font-size:11px">Nothing matches.</div>';
+  },
+
+  paintSwatches(){
+    const note = this.current();
+    $('swatches').innerHTML = Object.entries(COLORS).map(([k, hex]) => `
+      <button class="sw${note && note.color === k ? ' on' : ''}" style="background:${hex}"
+              title="${k}" onclick="Pad.setColor('${k}')"></button>`).join('');
+  },
+
+  setState(text, kind){
+    const el = $('state');
+    el.textContent = text;
+    el.className = 'state' + (kind ? ' ' + kind : '');
+  },
+
+  /* ---- writing ---- */
+
+  dirty(){
+    $('chars').textContent = $('body').value.length + ' chars';
+    this.setState('Unsaved…');
+    clearTimeout(this.saveTimer);
+    // Long enough that a normal sentence is one request, short enough that
+    // closing the window a beat after typing has already saved.
+    this.saveTimer = setTimeout(() => this.save(), 700);
+  },
+
+  /* `now` = the window is going away: fire a keepalive request and don't wait. */
+  flush(now){
+    if (!this.saveTimer) return;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    this.save(now);
+  },
+
+  async save(keepalive){
+    if (!this.id) return;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    if (this.saving){ this.again = true; return; }
+    this.saving = true;
+    this.setState('Saving…', 'saving');
+    const body = {title: $('title').value, body: $('body').value, base_updated_at: this.base};
+    try {
+      const opts = {method:'PATCH', body: JSON.stringify(body)};
+      if (keepalive) opts.keepalive = true;
+      const note = await api('/api/notepad/' + this.id, opts);
+      this.base = note.updated_at;
+      const i = this.notes.findIndex(n => n.id === note.id);
+      if (i >= 0) this.notes[i] = note; else this.notes.unshift(note);
+      this.setState('Saved just now', 'saved');
+      this.paintList();
+    } catch (err) {
+      if (err.status === 409){
+        // The other window won. Nothing is lost — the text is still in the box
+        // and one more keystroke re-saves it — but the editor has to stop
+        // claiming a base timestamp the server has moved past.
+        this.setState('Changed in another window — press Ctrl+S to overwrite', 'error');
+        this.base = null;
+      } else {
+        this.setState('Not saved — ' + err.message, 'error');
+      }
+    } finally {
+      this.saving = false;
+      if (this.again){ this.again = false; this.save(); }
+    }
+  },
+
+  async newNote(){
+    this.flush(true);
+    try {
+      const note = await api('/api/notepad', {method:'POST', body: JSON.stringify({title:'', body:''})});
+      this.notes.unshift(note);
+      this.open(note.id);
+      $('title').focus();
+    } catch (err) { this.setState('Could not create — ' + err.message, 'error'); }
+  },
+
+  async patch(fields){
+    const note = this.current();
+    if (!note) return;
+    try {
+      const updated = await api('/api/notepad/' + note.id, {method:'PATCH', body: JSON.stringify(fields)});
+      this.notes[this.notes.findIndex(n => n.id === note.id)] = updated;
+      this.base = updated.updated_at;
+      // Pinning re-sorts the rail, so take the server's order rather than
+      // guessing it here.
+      this.notes.sort((a, b) => (b.pinned - a.pinned) || b.updated_at.localeCompare(a.updated_at));
+      this.paint();
+    } catch (err) { this.setState('Could not save — ' + err.message, 'error'); }
+  },
+
+  togglePin(){ const n = this.current(); if (n) this.patch({pinned: !n.pinned}); },
+  setColor(color){ this.patch({color}); },
+
+  async remove(){
+    const note = this.current();
+    if (!note) return;
+    const label = note.title || note.preview || 'this note';
+    if (!confirm('Delete "' + label + '"? This cannot be undone.')) return;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    try {
+      await api('/api/notepad/' + note.id, {method:'DELETE'});
+      this.notes = this.notes.filter(n => n.id !== note.id);
+      this.id = null;
+      if (this.notes.length) this.open(this.notes[0].id); else await this.newNote();
+    } catch (err) { this.setState('Could not delete — ' + err.message, 'error'); }
+  },
+
+  async copy(){
+    try {
+      await navigator.clipboard.writeText($('body').value);
+      this.setState('Copied to the clipboard', 'saved');
+    } catch (err) { this.setState('Clipboard blocked — select and copy by hand', 'error'); }
+  },
+
+  toggleRail(){ $('rail').classList.toggle('hide'); },
+
+  /* Hand the note to a real window and let the deck close the panel behind it,
+     so the same note is never open twice by accident. */
+  popOut(){
+    this.flush();
+    const w = window.open('/notepad.html' + (this.id ? '?note=' + this.id : ''), 'blanco-os-notepad',
+                          'popup=yes,width=520,height=620');
+    if (!w){ this.setState('Popup blocked — allow popups for this site', 'error'); return; }
+    w.focus();
+    this.close();
+  },
+
+  close(){
+    this.flush();
+    if (this.embedded) parent.postMessage({type:'blanco-notepad', action:'close'}, location.origin);
+    else window.close();
+  },
+
+  key(e){
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key.toLowerCase() === 's'){ e.preventDefault(); this.save(); return; }
+    if (mod && e.altKey && e.key.toLowerCase() === 'n'){ e.preventDefault(); this.newNote(); return; }
+    if (e.key === 'Escape' && !this.typing()){ e.preventDefault(); this.close(); }
+  },
+};
+
+/* `const Pad` lands in the script's lexical scope, not on `window`, so the
+   deck's panel — a different document — could not reach it. Its ⇱ and ✕ call
+   straight into this object, so it has to be an actual property. */
+window.Pad = Pad;
+Pad.init();
+</script>
+</body>
+</html>

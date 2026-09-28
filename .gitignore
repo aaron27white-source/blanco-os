@@ -1,0 +1,13 @@
+data/
+.venv
+__pycache__/
+*.pyc
+.env
+# Timestamped copies made before editing .env. Same contents, same reasons to
+# keep them out of git — and they are easy to miss, because `.env` alone does
+# not match them. (.env.example is tracked on purpose and unaffected.)
+.env.bak-*
+
+# Test-runner cache. Present on disk before this repo existed, so it needs an
+# explicit rule rather than relying on __pycache__/ to catch it.
+.pytest_cache/

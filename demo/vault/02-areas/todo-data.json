@@ -1,0 +1,76 @@
+{
+ "version": 1,
+ "last_synced": "2026-09-27",
+ "events": [
+  {
+   "id": "ev-1",
+   "title": "Study block \u2014 AWS SAA",
+   "date": "2026-09-28",
+   "time": "19:00",
+   "agent": true,
+   "reason": "cert pipeline"
+  },
+  {
+   "id": "ev-2",
+   "title": "Client call \u2014 automation audit",
+   "date": "2026-09-29",
+   "time": "10:30",
+   "agent": false,
+   "reason": ""
+  }
+ ],
+ "boardTasks": [
+  {
+   "id": "bt-1",
+   "title": "Ship the missed-call text-back pilot",
+   "priority": "high",
+   "status": "in-progress",
+   "dueDate": "2026-09-30",
+   "notes": "",
+   "agent": true,
+   "agentReason": "Twilio webhook drafted."
+  },
+  {
+   "id": "bt-2",
+   "title": "Price the next liquidation lot",
+   "priority": "high",
+   "status": "todo",
+   "dueDate": "2026-09-28",
+   "notes": "",
+   "agent": true,
+   "agentReason": "Comps pulled by the pricer agent."
+  },
+  {
+   "id": "bt-3",
+   "title": "Send three proposals",
+   "priority": "medium",
+   "status": "todo",
+   "dueDate": "2026-09-29",
+   "notes": ""
+  },
+  {
+   "id": "bt-4",
+   "title": "Call five ITAD suppliers",
+   "priority": "medium",
+   "status": "done",
+   "dueDate": "",
+   "notes": ""
+  },
+  {
+   "id": "bt-5",
+   "title": "Write entry/exit rules",
+   "priority": "low",
+   "status": "todo",
+   "dueDate": "",
+   "notes": ""
+  }
+ ],
+ "notes": [
+  {
+   "id": "n-1",
+   "text": "Agents that don't earn their cost get switched off.",
+   "date": "2026-09-27"
+  }
+ ],
+ "activity": []
+}

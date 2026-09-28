@@ -1,0 +1,23 @@
+{
+ "meta": {
+  "version": 1,
+  "name": "Demo Diary"
+ },
+ "entries": {
+  "2026-09-27": {
+   "mood": "\ud83d\udd25",
+   "text": "Pilot webhook works end to end.",
+   "tags": [
+    "build"
+   ],
+   "created": "2026-09-27T21:10:00-05:00"
+  },
+  "2026-09-26": {
+   "mood": "\ud83d\ude0a",
+   "text": "Good day. Two lots priced.",
+   "tags": [
+    "electronics"
+   ]
+  }
+ }
+}

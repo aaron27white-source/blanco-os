@@ -1,0 +1,21 @@
+{
+  "name": "Blanco OS — Agentic Command",
+  "short_name": "Blanco OS",
+  "description": "Personal agentic operating system: command deck, ventures, agents, second brain",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "background_color": "#070707",
+  "theme_color": "#070707",
+  "orientation": "any",
+  "lang": "en-US",
+  "id": "blanco-os-command-v1",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

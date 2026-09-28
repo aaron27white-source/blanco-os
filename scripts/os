@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# blanco-os agent CLI
+#
+# The way agents write to Blanco OS. Sweet Jones and the sub-agents work in
+# bash, so this wraps the API in commands they can call directly instead of
+# appending to markdown and hoping someone reads it.
+#
+# Install once:  ln -sf /home/you/workspace/blanco-os/scripts/os ~/.local/bin/os
+#
+#   os brief                                    what is true right now (text)
+#   os focus                                    the current focus line
+#   os alert  -s critical -t "..." [-d "..."]   raise an alert on the deck
+#   os notify -t "..." [-d "..."] [-s warning]  push a message to Blanco
+#   os task   "title" [-p high] [--due DATE]    add a task (writes the vault)
+#   os event  "title" DATE [TIME]               add to the calendar + todo-list.md
+#   os note   "text"                            quick note into the vault
+#   os curate [--json|--plan N|--coverage]       what to research next
+#   os bridge -k deal -t "..." [-d "..."]       Your Business -> personal notice
+#   os snapshot                                 record today's metrics
+#   os json <path>                              raw GET, e.g. os json /api/agents
+set -euo pipefail
+
+API="${BLANCO_OS_URL:-http://127.0.0.1:8800}"
+
+die() { echo "os: $*" >&2; exit 1; }
+need() { [ -n "${1:-}" ] || die "$2"; }
+
+post() { curl -sf -X POST "$API$1" -H 'content-type: application/json' -d "$2"; }
+get()  { curl -sf "$API$1"; }
+
+# JSON-escape a string using python (handles quotes, newlines, unicode).
+esc() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }
+
+cmd="${1:-help}"; shift || true
+
+case "$cmd" in
+  brief)
+    get /api/command/brief | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+print(d["greeting"] + " — " + d["day"])
+print("FOCUS: " + d["focus"]["headline"])
+if d["focus"]["detail"]:
+    print("       " + d["focus"]["detail"])
+print()
+for m in d["metrics"]:
+    unit = m["unit"] or ""
+    print("  %-20s %g%s — %s" % (m["label"], m["value"], unit, m["hint"]))
+if d["now_next"]:
+    print()
+    print("NEXT:")
+    for i in d["now_next"][:5]:
+        due = " (due %s)" % i["due"] if i["due"] else ""
+        print("  [%s] %s%s" % (i["urgency"], i["title"], due))
+if d["alerts"]:
+    print()
+    print("ALERTS (%d):" % len(d["alerts"]))
+    for a in d["alerts"]:
+        print("  [%s] %s — %s" % (a["severity"], a["title"], a["detail"]))
+print()
+print("systems=%s agents=%d/%d bridge_unread=%d" % (
+    d["systems_health"], d["agents_online"], d["agents_total"], d["bridge_unread"]))
+' ;;
+
+  focus)
+    get /api/command/focus | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["headline"]); print(d["detail"])' ;;
+
+  alert)
+    sev=warning; title=""; detail=""; src="agent"
+    while [ $# -gt 0 ]; do case "$1" in
+      -s|--severity) sev="$2"; shift 2;;
+      -t|--title)    title="$2"; shift 2;;
+      -d|--detail)   detail="$2"; shift 2;;
+      --source)      src="$2"; shift 2;;
+      *) die "unknown flag $1";; esac; done
+    need "$title" "alert needs -t 'title'"
+    post /api/command/alerts "{\"source\":$(esc "$src"),\"severity\":$(esc "$sev"),\"title\":$(esc "$title"),\"detail\":$(esc "$detail"),\"dedupe_key\":$(esc "$src-$title")}" >/dev/null
+    echo "alert raised: $title" ;;
+
+  notify)
+    sev=info; title=""; detail=""
+    while [ $# -gt 0 ]; do case "$1" in
+      -s|--severity) sev="$2"; shift 2;;
+      -t|--title)    title="$2"; shift 2;;
+      -d|--detail)   detail="$2"; shift 2;;
+      *) die "unknown flag $1";; esac; done
+    need "$title" "notify needs -t 'title'"
+    post /api/command/notify/test "{\"title\":$(esc "$title"),\"body\":$(esc "$detail"),\"severity\":$(esc "$sev")}" \
+      | python3 -c 'import json,sys; print("sent:", json.load(sys.stdin)["sent"])' ;;
+
+  task)
+    title="${1:-}"; shift || true
+    need "$title" "task needs a title"
+    prio=medium; due=null
+    while [ $# -gt 0 ]; do case "$1" in
+      -p|--priority) prio="$2"; shift 2;;
+      --due)         due="$(esc "$2")"; shift 2;;
+      *) die "unknown flag $1";; esac; done
+    post /api/tasks "{\"title\":$(esc "$title"),\"priority\":$(esc "$prio"),\"due_date\":$due,\"agent\":true,\"agent_reason\":\"raised by an agent\"}" \
+      | python3 -c 'import json,sys; print("task added:", json.load(sys.stdin)["id"])' ;;
+
+  event)
+    title="${1:-}"; date_="${2:-}"; time_="${3:-}"
+    need "$title" "event needs a title"; need "$date_" "event needs a date (YYYY-MM-DD)"
+    post /api/events "{\"title\":$(esc "$title"),\"date\":$(esc "$date_"),\"time\":$(esc "$time_"),\"agent\":true}" \
+      | python3 -c 'import json,sys; print("event added:", json.load(sys.stdin)["id"])' ;;
+
+  note)
+    text="${1:-}"; need "$text" "note needs text"
+    post /api/notes "{\"text\":$(esc "$text")}" >/dev/null; echo "note saved" ;;
+
+  bridge)
+    kind=notice; title=""; detail=""; amount=null
+    while [ $# -gt 0 ]; do case "$1" in
+      -k|--kind)   kind="$2"; shift 2;;
+      -t|--title)  title="$2"; shift 2;;
+      -d|--detail) detail="$2"; shift 2;;
+      -a|--amount) amount="$2"; shift 2;;
+      *) die "unknown flag $1";; esac; done
+    need "$title" "bridge needs -t 'title'"
+    post /api/bridge "{\"kind\":$(esc "$kind"),\"title\":$(esc "$title"),\"body\":$(esc "$detail"),\"amount\":$amount}" >/dev/null
+    echo "bridge message delivered: $title" ;;
+
+  curate)
+    # `os curate --json` is what the Knowledge Curator calls each run.
+    if [ "${1:-}" = "--json" ]; then get /api/curator/next; exit $?; fi
+    if [ "${1:-}" = "--plan" ]; then
+      get "/api/curator/plan?runs=${2:-9}" | python3 -c '
+import json, sys
+for i, p in enumerate(json.load(sys.stdin), 1):
+    print("  %2d [%-7s] %s %s -> %s" % (i, p["lane"], p["emoji"], p["domain"], p["subtopic"]))'
+      exit $?
+    fi
+    if [ "${1:-}" = "--coverage" ]; then
+      get /api/curator/coverage | python3 -c '
+import json, sys
+for x in sorted(json.load(sys.stdin), key=lambda r: -r["score"]):
+    print("  %s %-36s %-8s %d/%d" % (x["emoji"], x["domain"][:36], x["lane"], x["covered"], x["total"]))'
+      exit $?
+    fi
+    get /api/curator/next | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+print("NEXT: %s %s -> %s" % (d["emoji"], d["domain"], d["subtopic"]))
+print("      " + d["description"][:150])
+print("      slug: %s" % d["slug_hint"])
+print("      why:  %s" % d["reason"])
+print("      %d written, %d left" % (d["covered_total"], d["remaining_total"]))' ;;
+
+  snapshot) post /api/command/history/snapshot '{}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["message"])' ;;
+
+  json) need "${1:-}" "json needs a path"; get "$1" ;;
+
+  help|--help|-h) sed -n '3,22p' "$0" | sed 's/^# \{0,1\}//' ;;
+
+  *) die "unknown command '$cmd' — try: os help" ;;
+esac
