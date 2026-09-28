@@ -2929,7 +2929,7 @@ const App = {
           ${a.detail ? `<div style="font-size:12px;color:${
             a.detail.includes('not found') ? '#ffb020' : '#8a8386'}">${esc(a.detail)}</div>` : ''}
           <div class="agentfoot">
-            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.workspace.replace('/home/you/',''))}</span>
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.workspace.replace(/^\/home\/[^/]+\//,'~/'))}</span>
             <span style="flex-shrink:0">${esc(ago(a.last_seen))}</span>
           </div>
         </div>`).join('')}</div>

@@ -90,7 +90,7 @@ def status() -> schemas.EmailStatus:
         categories=[str(c) for c in categories],
         vip_sender_count=len(getattr(checker, "VIP_SENDERS", {})) if checker else 0,
         state_file=str(path / "state.json"),
-        log_last_written=modified_at(Path("/home/you/workspace/email-categorizer/email-categorizer.log")),
+        log_last_written=modified_at(get_settings().workspace_path / "email-categorizer" / "email-categorizer.log"),
     )
 
 

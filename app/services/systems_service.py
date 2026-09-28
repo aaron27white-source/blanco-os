@@ -292,12 +292,12 @@ def _probe_services() -> list[schemas.ServiceStatus]:
     # Dispatch bot — process + 5-minute watchdog
     bot_up = process_running("dispatch-bot") if probes else False
     add("dispatch-bot-bot", "Dispatch freight bot 🦅", "process", "up" if bot_up else ("down" if probes else "unknown"),
-        "dispatch_bot/start_bot.sh", "watchdog re-launches every 5 min")
+        "dispatch_bot/start_bot.sh", "watchdog re-launches every 5 min", optional=True)
 
     # Email categorizer — Hermes owns the schedule now, so ask Hermes. Its shim
     # only appends to the categorizer log on stderr, which meant a clean run
     # left the log untouched and a healthy job read as stale forever.
-    categorizer_log = Path("/home/you/workspace/email-categorizer/email-categorizer.log")
+    categorizer_log = settings.workspace_path / "email-categorizer" / "email-categorizer.log"
     job = find_hermes_job("email organizer", "email-digest")
     if job:
         status, detail = hermes_job_freshness(job)

@@ -37,8 +37,8 @@ fi
 echo "  [2/4] Nerve WebUI (3080)"
 if up http://127.0.0.1:3080/; then
     ok "already up"
-elif [ -x /home/you/start-nerve.sh ] || [ -f /home/you/start-nerve.sh ]; then
-    setsid bash /home/you/start-nerve.sh >/tmp/nerve.log 2>&1 < /dev/null &
+elif [ -x $HOME/start-nerve.sh ] || [ -f $HOME/start-nerve.sh ]; then
+    setsid bash $HOME/start-nerve.sh >/tmp/nerve.log 2>&1 < /dev/null &
     wait_for http://127.0.0.1:3080/ 20 && ok "started" || warn "still starting — see /tmp/nerve.log"
 else
     warn "start-nerve.sh not found, skipped"
@@ -48,8 +48,8 @@ fi
 echo "  [3/4] Hermes WebUI (8787)"
 if up http://127.0.0.1:8787/; then
     ok "already up"
-elif [ -f /home/you/start-hermes-webui.sh ]; then
-    setsid bash /home/you/start-hermes-webui.sh >/tmp/hermes-webui.log 2>&1 < /dev/null &
+elif [ -f $HOME/start-hermes-webui.sh ]; then
+    setsid bash $HOME/start-hermes-webui.sh >/tmp/hermes-webui.log 2>&1 < /dev/null &
     wait_for http://127.0.0.1:8787/ 20 && ok "started" || warn "still starting — see /tmp/hermes-webui.log"
 else
     warn "start-hermes-webui.sh not found, skipped"

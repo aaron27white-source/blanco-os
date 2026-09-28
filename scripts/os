@@ -5,7 +5,7 @@
 # bash, so this wraps the API in commands they can call directly instead of
 # appending to markdown and hoping someone reads it.
 #
-# Install once:  ln -sf /home/you/workspace/blanco-os/scripts/os ~/.local/bin/os
+# Install once:  ln -sf "$PWD/scripts/os"  (from the repo root) ~/.local/bin/os
 #
 #   os brief                                    what is true right now (text)
 #   os focus                                    the current focus line

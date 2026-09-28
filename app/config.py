@@ -33,8 +33,8 @@ class Settings(BaseSettings):
     db_path: Path = REPO_ROOT / "data" / "blanco_os.db"
 
     # --- external surfaces we read ---------------------------------------
-    vault_path: Path = Path("/home/you/vault")
-    workspace_path: Path = Path("/home/you/workspace")
+    vault_path: Path = Path.home() / "vault"
+    workspace_path: Path = Path.home() / "workspace"
 
     # --- live probes ------------------------------------------------------
     openclaw_url: str = "http://localhost:8080"

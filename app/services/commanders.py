@@ -207,7 +207,7 @@ CLAUDE = Commander(
     primary_id="default",
     primary_name="Claude Code",
     primary_emoji="🦊",
-    candidates=("/home/you/.local/bin/claude", "claude"),
+    candidates=(str(Path.home() / ".local/bin/claude"), "claude"),
 )
 
 HERMES = Commander(
@@ -218,7 +218,7 @@ HERMES = Commander(
     primary_id="default",
     primary_name="Hermes",
     primary_emoji="⚡",
-    candidates=("/home/you/.local/bin/hermes", "hermes"),
+    candidates=(str(Path.home() / ".local/bin/hermes"), "hermes"),
 )
 
 ALL: tuple[Commander, ...] = (OPENCLAW, CLAUDE, HERMES)

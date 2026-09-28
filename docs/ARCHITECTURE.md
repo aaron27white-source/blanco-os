@@ -26,7 +26,7 @@ To run it in the foreground instead (development):
 
 ```bash
 systemctl --user stop blanco-os
-cd /home/you/workspace/blanco-os && ./run.sh
+cd blanco-os && ./run.sh
 ```
 
 - **Command deck: <http://127.0.0.1:8800>**
